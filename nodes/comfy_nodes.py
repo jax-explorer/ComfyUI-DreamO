@@ -27,39 +27,13 @@ except ImportError:
 class DreamOLoadModelFromLocal:
     @classmethod
     def INPUT_TYPES(cls):
-        checkpoints_base_paths = folder_paths.get_folder_paths("checkpoints")
-        flux1_model_files = []
-        expected_filenames = ["flux1-dev.safetensors", "flux1-dev-fp8.safetensors"]
-        flux1_subdir_name = "FLUX1"
-
-        if checkpoints_base_paths:
-            for base_path in checkpoints_base_paths:
-                flux1_full_dir = os.path.join(base_path, flux1_subdir_name)
-                if os.path.isdir(flux1_full_dir):
-                    try:
-                        for f_name in os.listdir(flux1_full_dir):
-                            if f_name in expected_filenames:
-                                # Store the path relative to the checkpoints directory, e.g., "FLUX1/flux1-dev.safetensors"
-                                relative_file_path = os.path.join(flux1_subdir_name, f_name)
-                                if relative_file_path not in flux1_model_files:
-                                    flux1_model_files.append(relative_file_path)
-                    except OSError:
-                        # This can happen if the directory is not accessible, log or pass
-                        print(f"Warning: Could not access or list directory {flux1_full_dir}")
-                        pass 
-        
-        flux1_model_files.sort() # Ensure consistent order
-
-        if not flux1_model_files:
-            # If no specific files found, you might want a placeholder or make the node unusable
-            # For now, an empty list will result in an empty dropdown or default if ComfyUI handles it.
-            # Consider adding a default like "None" and checking in load_model if you want to prevent errors.
-            print("Warning: No FLUX1 .safetensors files (flux1-dev.safetensors, flux1-dev-fp8.safetensors) found in any models/checkpoints/FLUX1/ directory.")
-
         return {
             "required": {
-                "local_flux_safetensor_file": (flux1_model_files, 
-                                                 {"tooltip": "Select local FLUX .safetensors file from models/checkpoints/FLUX1/"}),
+                "flux_pipeline_path": ("STRING", {
+                    "default": "", 
+                    "multiline": False,
+                    "tooltip": "Path to the local FLUX pipeline directory. If empty, defaults to 'models/diffusers/flux1-dev/'"
+                }),
                 "cpu_offload": ("BOOLEAN", {"default": False}),
                 "dreamo_lora": (folder_paths.get_filename_list("loras"), ),
                 "dreamo_cfg_distill": (folder_paths.get_filename_list("loras"), ),
@@ -74,27 +48,31 @@ class DreamOLoadModelFromLocal:
     FUNCTION = "load_model"
     CATEGORY = "DreamO"
 
-    def load_model(self, local_flux_safetensor_file, cpu_offload, dreamo_lora, dreamo_cfg_distill, turbo_lora, quality_lora_pos, quality_lora_neg, int8):
+    def load_model(self, flux_pipeline_path, cpu_offload, dreamo_lora, dreamo_cfg_distill, turbo_lora, quality_lora_pos, quality_lora_neg, int8):
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
-        if not local_flux_safetensor_file or local_flux_safetensor_file == "None": # Check if a file was actually selected
-            raise ValueError("DreamO Local: No FLUX .safetensors file selected or found. Please ensure models/checkpoints/FLUX1/ contains flux1-dev.safetensors or flux1-dev-fp8.safetensors.")
-
-        # local_flux_safetensor_file is expected to be like "FLUX1/flux1-dev.safetensors"
-        flux_model_full_path = folder_paths.get_full_path("checkpoints", local_flux_safetensor_file)
+        determined_path = ""
+        if not flux_pipeline_path or flux_pipeline_path.strip() == "":
+            diffusers_base_paths = folder_paths.get_folder_paths("diffusers")
+            if not diffusers_base_paths:
+                raise ValueError("DreamO Local: No 'diffusers' model directory configured in ComfyUI.")
+            determined_path = os.path.join(diffusers_base_paths[0], "flux1-dev")
+            print(f"DreamO Local: flux_pipeline_path is empty, defaulting to: {determined_path}")
+        else:
+            determined_path = flux_pipeline_path.strip()
+            print(f"DreamO Local: Using user-provided flux_pipeline_path: {determined_path}")
         
-        if flux_model_full_path is None or not os.path.isfile(flux_model_full_path):
+        if not os.path.isdir(determined_path):
             error_message = (
-                f"DreamO Local: Selected local FLUX .safetensors file not found: '{local_flux_safetensor_file}'.\n"
-                f"Attempted to resolve to: {flux_model_full_path}\n"
-                f"Please ensure the file exists in the correct models/checkpoints/FLUX1/ subdirectory."
+                f"DreamO Local: The FLUX pipeline path is not a valid directory: '{determined_path}'.\n"
+                f"Please ensure it points to a valid Hugging Face Diffusers model directory."
             )
             raise ValueError(error_message)
 
-        print(f"DreamO Local: Attempting to load FLUX pipeline from .safetensors file: {flux_model_full_path}")
+        print(f"DreamO Local: Attempting to load FLUX pipeline from: {determined_path}")
 
-        # Load DreamO pipeline directly from the .safetensors file path
-        dreamo_pipeline = DreamOPipeline.from_pretrained(flux_model_full_path, torch_dtype=torch.bfloat16)
+        # Load DreamO pipeline from the resolved local path
+        dreamo_pipeline = DreamOPipeline.from_pretrained(determined_path, torch_dtype=torch.bfloat16)
         
         dreamo_lora_path = folder_paths.get_full_path("loras", dreamo_lora)
         dreamo_cfg_distill_path = folder_paths.get_full_path("loras", dreamo_cfg_distill)
