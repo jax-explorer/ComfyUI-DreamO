@@ -29,7 +29,8 @@ class DreamOLoadModelFromLocal:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "flux_model_path": ("STRING", {"default": "", "tooltip": "Path to the local FLUX model directory"}),
+                "local_flux_version_path_suffix": (["FLUX1/flux1-dev", "FLUX1/flux1-dev-fp8"], 
+                                                  {"default": "FLUX1/flux1-dev", "tooltip": "Select the local FLUX model directory relative to ComfyUI/models/checkpoints/"}),
                 "cpu_offload": ("BOOLEAN", {"default": False}),
                 "dreamo_lora": (folder_paths.get_filename_list("loras"), ),
                 "dreamo_cfg_distill": (folder_paths.get_filename_list("loras"), ),
@@ -44,10 +45,22 @@ class DreamOLoadModelFromLocal:
     FUNCTION = "load_model"
     CATEGORY = "DreamO"
 
-    def load_model(self, flux_model_path, cpu_offload, dreamo_lora, dreamo_cfg_distill, turbo_lora, quality_lora_pos, quality_lora_neg, int8):
+    def load_model(self, local_flux_version_path_suffix, cpu_offload, dreamo_lora, dreamo_cfg_distill, turbo_lora, quality_lora_pos, quality_lora_neg, int8):
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        # Load DreamO pipeline
-        dreamo_pipeline = DreamOPipeline.from_pretrained(flux_model_path, torch_dtype=torch.bfloat16)
+        
+        checkpoints_base_dir = folder_paths.get_folder_paths("checkpoints")[0]
+        # local_flux_version_path_suffix is something like "FLUX1/flux1-dev"
+        # checkpoints_base_dir is ComfyUI/models/checkpoints
+        # So, the full path will be ComfyUI/models/checkpoints/FLUX1/flux1-dev
+        flux_model_full_path = os.path.join(checkpoints_base_dir, local_flux_version_path_suffix)
+        
+        print(f"DreamO Local: Attempting to load FLUX pipeline from: {flux_model_full_path}")
+
+        if not os.path.isdir(flux_model_full_path):
+            raise ValueError(f"DreamO Local: Specified local FLUX model directory not found: {flux_model_full_path}. Please ensure it exists under ComfyUI/models/checkpoints/.")
+
+        # Load DreamO pipeline from the resolved local path
+        dreamo_pipeline = DreamOPipeline.from_pretrained(flux_model_full_path, torch_dtype=torch.bfloat16)
         
         dreamo_lora_path = folder_paths.get_full_path("loras", dreamo_lora)
         dreamo_cfg_distill_path = folder_paths.get_full_path("loras", dreamo_cfg_distill)
@@ -77,9 +90,7 @@ class DreamOLoadModel:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "model_source": (["HuggingFace: black-forest-labs/FLUX.1-dev", "Local Directory: checkpoints/FLUX1/flux1-dev", "Local Directory: checkpoints/FLUX1/flux1-dev-fp8"], 
-                                 {"default": "HuggingFace: black-forest-labs/FLUX.1-dev"}),
-                "hf_token": ("STRING", {"default": "", "multiline": True, "tooltip": "Hugging Face token, required if loading from HuggingFace or if local model fallback occurs."}),
+                "hf_token": ("STRING", {"default": "", "multiline": True, "tooltip": "Hugging Face token for black-forest-labs/FLUX.1-dev"}),
                 "cpu_offload": ("BOOLEAN", {"default": False}),
                 "dreamo_lora": (folder_paths.get_filename_list("loras"), ),
                 "dreamo_cfg_distill": (folder_paths.get_filename_list("loras"), ),
@@ -94,42 +105,16 @@ class DreamOLoadModel:
     FUNCTION = "load_model"
     CATEGORY = "DreamO"
 
-    def load_model(self, model_source, hf_token, cpu_offload, dreamo_lora, dreamo_cfg_distill, turbo_lora, quality_lora_pos, quality_lora_neg, int8):
-        model_identifier = None
-        attempt_hf_load = False
+    def load_model(self, hf_token, cpu_offload, dreamo_lora, dreamo_cfg_distill, turbo_lora, quality_lora_pos, quality_lora_neg, int8):
+        if not (hf_token and hf_token.strip()):
+            raise ValueError("DreamO: Hugging Face token is required to download or access 'black-forest-labs/FLUX.1-dev', but the token is missing or empty.")
         
-        checkpoints_dir = folder_paths.get_folder_paths("checkpoints")[0]
-        flux1_models_dir = os.path.join(checkpoints_dir, "FLUX1")
-
-        if model_source == "Local Directory: checkpoints/FLUX1/flux1-dev":
-            potential_path = os.path.join(flux1_models_dir, "flux1-dev")
-            if os.path.isdir(potential_path):
-                model_identifier = potential_path
-                print(f"DreamO: Using local FLUX pipeline directory: {model_identifier}")
-            else:
-                print(f"DreamO: Local directory {potential_path} not found. Falling back to HuggingFace for black-forest-labs/FLUX.1-dev.")
-                attempt_hf_load = True
-        elif model_source == "Local Directory: checkpoints/FLUX1/flux1-dev-fp8":
-            potential_path = os.path.join(flux1_models_dir, "flux1-dev-fp8")
-            if os.path.isdir(potential_path):
-                model_identifier = potential_path
-                print(f"DreamO: Using local FLUX pipeline directory: {model_identifier}")
-            else:
-                print(f"DreamO: Local directory {potential_path} not found. Falling back to HuggingFace for black-forest-labs/FLUX.1-dev.")
-                attempt_hf_load = True  # Fallback to full version on HF
-        else:  # HuggingFace source
-            attempt_hf_load = True
-
-        if attempt_hf_load:
-            model_identifier = 'black-forest-labs/FLUX.1-dev'
-            if not (hf_token and hf_token.strip()):
-                raise ValueError("DreamO: Hugging Face token is required to download or access 'black-forest-labs/FLUX.1-dev', but the token is missing or empty.")
-            print(f"DreamO: Preparing to load from HuggingFace: {model_identifier}. Logging in.")
-            login(token=hf_token)
+        print(f"DreamO: Preparing to load from HuggingFace: black-forest-labs/FLUX.1-dev. Logging in.")
+        login(token=hf_token)
         
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
-        # Load DreamO pipeline
+        model_identifier = 'black-forest-labs/FLUX.1-dev'
         cache_dir = folder_paths.get_folder_paths("diffusers")[0]
         print(f"DreamO: Loading FLUX pipeline from: {model_identifier}")
         dreamo_pipeline = DreamOPipeline.from_pretrained(model_identifier, torch_dtype=torch.bfloat16, cache_dir=cache_dir)
