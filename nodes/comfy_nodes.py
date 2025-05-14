@@ -29,11 +29,17 @@ class DreamOLoadModelFromLocal:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "flux_model_path": ("STRING", {"default": "", "tooltip": ""}),
+                "flux_pipeline_path": ("STRING", {
+                    "default": "", 
+                    "multiline": False,
+                    "tooltip": "Path to the local FLUX pipeline directory. If empty, defaults to 'models/diffusers/flux1-dev/'"
+                }),
                 "cpu_offload": ("BOOLEAN", {"default": False}),
                 "dreamo_lora": (folder_paths.get_filename_list("loras"), ),
                 "dreamo_cfg_distill": (folder_paths.get_filename_list("loras"), ),
-                "turbo_lora": (["None"] +folder_paths.get_filename_list("loras"), ),
+                "turbo_lora": (["None"] + folder_paths.get_filename_list("loras"), ),
+                "quality_lora_pos": (["None"] + folder_paths.get_filename_list("loras"), {"tooltip": "Optional positive quality LoRA (e.g., dreamo_quality_lora_pos.safetensors)"}),
+                "quality_lora_neg": (["None"] + folder_paths.get_filename_list("loras"), {"tooltip": "Optional negative quality LoRA (e.g., dreamo_quality_lora_neg.safetensors)"}),
                 "int8": ("BOOLEAN", {"default": False}),
             }
         }
@@ -42,14 +48,40 @@ class DreamOLoadModelFromLocal:
     FUNCTION = "load_model"
     CATEGORY = "DreamO"
 
-    def load_model(self, flux_model_path, cpu_offload, dreamo_lora, dreamo_cfg_distill, turbo_lora, int8):
+    def load_model(self, flux_pipeline_path, cpu_offload, dreamo_lora, dreamo_cfg_distill, turbo_lora, quality_lora_pos, quality_lora_neg, int8):
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        # Load DreamO pipeline
-        dreamo_pipeline = DreamOPipeline.from_pretrained(flux_model_path, torch_dtype=torch.bfloat16)
+        
+        determined_path = ""
+        if not flux_pipeline_path or flux_pipeline_path.strip() == "":
+            diffusers_base_paths = folder_paths.get_folder_paths("diffusers")
+            if not diffusers_base_paths:
+                raise ValueError("DreamO Local: No 'diffusers' model directory configured in ComfyUI.")
+            determined_path = os.path.join(diffusers_base_paths[0], "FLUX.1-dev")
+            print(f"DreamO Local: flux_pipeline_path is empty, defaulting to: {determined_path}")
+        else:
+            determined_path = flux_pipeline_path.strip()
+            print(f"DreamO Local: Using user-provided flux_pipeline_path: {determined_path}")
+        
+        if not os.path.isdir(determined_path):
+            error_message = (
+                f"DreamO Local: The FLUX pipeline path is not a valid directory: '{determined_path}'.\n"
+                f"Please ensure it points to a valid Hugging Face Diffusers model directory."
+            )
+            raise ValueError(error_message)
+
+        print(f"DreamO Local: Attempting to load FLUX pipeline from: {determined_path}")
+
+        # Load DreamO pipeline from the resolved local path
+        dreamo_pipeline = DreamOPipeline.from_pretrained(determined_path, torch_dtype=torch.bfloat16)
+        
         dreamo_lora_path = folder_paths.get_full_path("loras", dreamo_lora)
         dreamo_cfg_distill_path = folder_paths.get_full_path("loras", dreamo_cfg_distill)
         turbo_lora_path = folder_paths.get_full_path("loras", turbo_lora) if turbo_lora != "None" else None
-        dreamo_pipeline.load_dreamo_model(device, dreamo_lora_path, dreamo_cfg_distill_path, turbo_lora_path)
+        quality_lora_pos_path = folder_paths.get_full_path("loras", quality_lora_pos) if quality_lora_pos != "None" else None
+        quality_lora_neg_path = folder_paths.get_full_path("loras", quality_lora_neg) if quality_lora_neg != "None" else None
+        
+        dreamo_pipeline.load_dreamo_model(device, dreamo_lora_path, dreamo_cfg_distill_path, turbo_lora_path, quality_lora_pos_path, quality_lora_neg_path)
+        
         if int8:
             from optimum.quanto import freeze, qint8, quantize
             quantize(dreamo_pipeline.transformer, qint8)
@@ -70,11 +102,13 @@ class DreamOLoadModel:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "hf_token": ("STRING", {"default": "", "multiline": True}),
+                "hf_token": ("STRING", {"default": "", "multiline": True, "tooltip": "Hugging Face token for black-forest-labs/FLUX.1-dev"}),
                 "cpu_offload": ("BOOLEAN", {"default": False}),
                 "dreamo_lora": (folder_paths.get_filename_list("loras"), ),
                 "dreamo_cfg_distill": (folder_paths.get_filename_list("loras"), ),
-                "turbo_lora": (["None"] +folder_paths.get_filename_list("loras"), ),
+                "turbo_lora": (["None"] + folder_paths.get_filename_list("loras"), ),
+                "quality_lora_pos": (["None"] + folder_paths.get_filename_list("loras"), {"tooltip": "Optional positive quality LoRA (e.g., dreamo_quality_lora_pos.safetensors)"}),
+                "quality_lora_neg": (["None"] + folder_paths.get_filename_list("loras"), {"tooltip": "Optional negative quality LoRA (e.g., dreamo_quality_lora_neg.safetensors)"}),
                 "int8": ("BOOLEAN", {"default": False}),
             }
         }
@@ -83,17 +117,28 @@ class DreamOLoadModel:
     FUNCTION = "load_model"
     CATEGORY = "DreamO"
 
-    def load_model(self, hf_token, cpu_offload, dreamo_lora, dreamo_cfg_distill, turbo_lora, int8):
+    def load_model(self, hf_token, cpu_offload, dreamo_lora, dreamo_cfg_distill, turbo_lora, quality_lora_pos, quality_lora_neg, int8):
+        if not (hf_token and hf_token.strip()):
+            raise ValueError("DreamO: Hugging Face token is required to download or access 'black-forest-labs/FLUX.1-dev', but the token is missing or empty.")
+        
+        print(f"DreamO: Preparing to load from HuggingFace: black-forest-labs/FLUX.1-dev. Logging in.")
         login(token=hf_token)
+        
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        # Load DreamO pipeline
-        model_root = 'black-forest-labs/FLUX.1-dev'
+        
+        model_identifier = 'black-forest-labs/FLUX.1-dev'
         cache_dir = folder_paths.get_folder_paths("diffusers")[0]
-        dreamo_pipeline = DreamOPipeline.from_pretrained(model_root, torch_dtype=torch.bfloat16, cache_dir=cache_dir)
+        print(f"DreamO: Loading FLUX pipeline from: {model_identifier}")
+        dreamo_pipeline = DreamOPipeline.from_pretrained(model_identifier, torch_dtype=torch.bfloat16, cache_dir=cache_dir)
+        
         dreamo_lora_path = folder_paths.get_full_path("loras", dreamo_lora)
         dreamo_cfg_distill_path = folder_paths.get_full_path("loras", dreamo_cfg_distill)
         turbo_lora_path = folder_paths.get_full_path("loras", turbo_lora) if turbo_lora != "None" else None
-        dreamo_pipeline.load_dreamo_model(device, dreamo_lora_path, dreamo_cfg_distill_path, turbo_lora_path)
+        quality_lora_pos_path = folder_paths.get_full_path("loras", quality_lora_pos) if quality_lora_pos != "None" else None
+        quality_lora_neg_path = folder_paths.get_full_path("loras", quality_lora_neg) if quality_lora_neg != "None" else None
+
+        dreamo_pipeline.load_dreamo_model(device, dreamo_lora_path, dreamo_cfg_distill_path, turbo_lora_path, quality_lora_pos_path, quality_lora_neg_path)
+        
         if int8:
             from optimum.quanto import freeze, qint8, quantize
             quantize(dreamo_pipeline.transformer, qint8)
@@ -249,7 +294,22 @@ class BgRmModelLoad:
     def load_bg_rm_model(self):
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         bg_rm_model = BEN2.BEN_Base().to(device).eval()
-        hf_hub_download(repo_id='PramaLLC/BEN2', filename='BEN2_Base.pth', local_dir='models')
-        bg_rm_model.loadcheckpoints('models/BEN2_Base.pth')
+        
+        # Determine the main ComfyUI models directory
+        # folder_paths.get_folder_paths("checkpoints")[0] usually gives ComfyUI/models/checkpoints/
+        # So, its parent is ComfyUI/models/
+        comfy_models_dir = os.path.abspath(os.path.join(folder_paths.get_folder_paths("checkpoints")[0], ".."))
+        ben2_target_dir = os.path.join(comfy_models_dir, "BEN2")
+        
+        os.makedirs(ben2_target_dir, exist_ok=True)
+        ben2_model_path = os.path.join(ben2_target_dir, 'BEN2_Base.pth')
+
+        if not os.path.exists(ben2_model_path):
+            print(f"Downloading BEN2 model to {ben2_model_path}...")
+            hf_hub_download(repo_id='PramaLLC/BEN2', filename='BEN2_Base.pth', local_dir=ben2_target_dir, local_dir_use_symlinks=False)
+        else:
+            print(f"BEN2 model found at {ben2_model_path}")
+        
+        bg_rm_model.loadcheckpoints(ben2_model_path)
         return (bg_rm_model,)
 
