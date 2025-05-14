@@ -56,7 +56,7 @@ class DreamOLoadModelFromLocal:
             diffusers_base_paths = folder_paths.get_folder_paths("diffusers")
             if not diffusers_base_paths:
                 raise ValueError("DreamO Local: No 'diffusers' model directory configured in ComfyUI.")
-            determined_path = os.path.join(diffusers_base_paths[0], "flux1-dev")
+            determined_path = os.path.join(diffusers_base_paths[0], "FLUX.1-dev")
             print(f"DreamO Local: flux_pipeline_path is empty, defaulting to: {determined_path}")
         else:
             determined_path = flux_pipeline_path.strip()
