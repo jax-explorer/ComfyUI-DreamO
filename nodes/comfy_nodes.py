@@ -77,7 +77,9 @@ class DreamOLoadModel:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "hf_token": ("STRING", {"default": "", "multiline": True}),
+                "model_source": (["HuggingFace: black-forest-labs/FLUX.1-dev", "Local Directory: checkpoints/FLUX1/flux1-dev", "Local Directory: checkpoints/FLUX1/flux1-dev-fp8"], 
+                                 {"default": "HuggingFace: black-forest-labs/FLUX.1-dev"}),
+                "hf_token": ("STRING", {"default": "", "multiline": True, "tooltip": "Hugging Face token, required if loading from HuggingFace or if local model fallback occurs."}),
                 "cpu_offload": ("BOOLEAN", {"default": False}),
                 "dreamo_lora": (folder_paths.get_filename_list("loras"), ),
                 "dreamo_cfg_distill": (folder_paths.get_filename_list("loras"), ),
@@ -92,15 +94,45 @@ class DreamOLoadModel:
     FUNCTION = "load_model"
     CATEGORY = "DreamO"
 
-    def load_model(self, hf_token, cpu_offload, dreamo_lora, dreamo_cfg_distill, turbo_lora, quality_lora_pos, quality_lora_neg, int8):
-        if hf_token and hf_token.strip():
+    def load_model(self, model_source, hf_token, cpu_offload, dreamo_lora, dreamo_cfg_distill, turbo_lora, quality_lora_pos, quality_lora_neg, int8):
+        model_identifier = None
+        attempt_hf_load = False
+        
+        checkpoints_dir = folder_paths.get_folder_paths("checkpoints")[0]
+        flux1_models_dir = os.path.join(checkpoints_dir, "FLUX1")
+
+        if model_source == "Local Directory: checkpoints/FLUX1/flux1-dev":
+            potential_path = os.path.join(flux1_models_dir, "flux1-dev")
+            if os.path.isdir(potential_path):
+                model_identifier = potential_path
+                print(f"DreamO: Using local FLUX pipeline directory: {model_identifier}")
+            else:
+                print(f"DreamO: Local directory {potential_path} not found. Falling back to HuggingFace for black-forest-labs/FLUX.1-dev.")
+                attempt_hf_load = True
+        elif model_source == "Local Directory: checkpoints/FLUX1/flux1-dev-fp8":
+            potential_path = os.path.join(flux1_models_dir, "flux1-dev-fp8")
+            if os.path.isdir(potential_path):
+                model_identifier = potential_path
+                print(f"DreamO: Using local FLUX pipeline directory: {model_identifier}")
+            else:
+                print(f"DreamO: Local directory {potential_path} not found. Falling back to HuggingFace for black-forest-labs/FLUX.1-dev.")
+                attempt_hf_load = True  # Fallback to full version on HF
+        else:  # HuggingFace source
+            attempt_hf_load = True
+
+        if attempt_hf_load:
+            model_identifier = 'black-forest-labs/FLUX.1-dev'
+            if not (hf_token and hf_token.strip()):
+                raise ValueError("DreamO: Hugging Face token is required to download or access 'black-forest-labs/FLUX.1-dev', but the token is missing or empty.")
+            print(f"DreamO: Preparing to load from HuggingFace: {model_identifier}. Logging in.")
             login(token=hf_token)
+        
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
         # Load DreamO pipeline
-        model_root = 'black-forest-labs/FLUX.1-dev'
         cache_dir = folder_paths.get_folder_paths("diffusers")[0]
-        dreamo_pipeline = DreamOPipeline.from_pretrained(model_root, torch_dtype=torch.bfloat16, cache_dir=cache_dir)
+        print(f"DreamO: Loading FLUX pipeline from: {model_identifier}")
+        dreamo_pipeline = DreamOPipeline.from_pretrained(model_identifier, torch_dtype=torch.bfloat16, cache_dir=cache_dir)
         
         dreamo_lora_path = folder_paths.get_full_path("loras", dreamo_lora)
         dreamo_cfg_distill_path = folder_paths.get_full_path("loras", dreamo_cfg_distill)
@@ -265,7 +297,22 @@ class BgRmModelLoad:
     def load_bg_rm_model(self):
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         bg_rm_model = BEN2.BEN_Base().to(device).eval()
-        hf_hub_download(repo_id='PramaLLC/BEN2', filename='BEN2_Base.pth', local_dir='models')
-        bg_rm_model.loadcheckpoints('models/BEN2_Base.pth')
+        
+        # Determine the main ComfyUI models directory
+        # folder_paths.get_folder_paths("checkpoints")[0] usually gives ComfyUI/models/checkpoints/
+        # So, its parent is ComfyUI/models/
+        comfy_models_dir = os.path.abspath(os.path.join(folder_paths.get_folder_paths("checkpoints")[0], ".."))
+        ben2_target_dir = os.path.join(comfy_models_dir, "BEN2")
+        
+        os.makedirs(ben2_target_dir, exist_ok=True)
+        ben2_model_path = os.path.join(ben2_target_dir, 'BEN2_Base.pth')
+
+        if not os.path.exists(ben2_model_path):
+            print(f"Downloading BEN2 model to {ben2_model_path}...")
+            hf_hub_download(repo_id='PramaLLC/BEN2', filename='BEN2_Base.pth', local_dir=ben2_target_dir, local_dir_use_symlinks=False)
+        else:
+            print(f"BEN2 model found at {ben2_model_path}")
+        
+        bg_rm_model.loadcheckpoints(ben2_model_path)
         return (bg_rm_model,)
 
