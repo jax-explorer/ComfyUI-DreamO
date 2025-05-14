@@ -29,8 +29,7 @@ class DreamOLoadModelFromLocal:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "local_flux_version_path_suffix": (["FLUX1/flux1-dev", "FLUX1/flux1-dev-fp8"], 
-                                                  {"default": "FLUX1/flux1-dev", "tooltip": "Select the local FLUX model directory relative to ComfyUI/models/checkpoints/"}),
+                # local_flux_version_path_suffix is removed, auto-detection will be used.
                 "cpu_offload": ("BOOLEAN", {"default": False}),
                 "dreamo_lora": (folder_paths.get_filename_list("loras"), ),
                 "dreamo_cfg_distill": (folder_paths.get_filename_list("loras"), ),
@@ -45,21 +44,30 @@ class DreamOLoadModelFromLocal:
     FUNCTION = "load_model"
     CATEGORY = "DreamO"
 
-    def load_model(self, local_flux_version_path_suffix, cpu_offload, dreamo_lora, dreamo_cfg_distill, turbo_lora, quality_lora_pos, quality_lora_neg, int8):
+    def load_model(self, cpu_offload, dreamo_lora, dreamo_cfg_distill, turbo_lora, quality_lora_pos, quality_lora_neg, int8):
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
         checkpoints_base_dir = folder_paths.get_folder_paths("checkpoints")[0]
-        # local_flux_version_path_suffix is something like "FLUX1/flux1-dev"
-        # checkpoints_base_dir is ComfyUI/models/checkpoints
-        # So, the full path will be ComfyUI/models/checkpoints/FLUX1/flux1-dev
-        flux_model_full_path = os.path.join(checkpoints_base_dir, local_flux_version_path_suffix)
         
-        print(f"DreamO Local: Attempting to load FLUX pipeline from: {flux_model_full_path}")
+        flux_model_full_path = None
+        path_dev = os.path.join(checkpoints_base_dir, "FLUX1", "flux1-dev")
+        path_dev_fp8 = os.path.join(checkpoints_base_dir, "FLUX1", "flux1-dev-fp8")
 
-        if not os.path.isdir(flux_model_full_path):
-            raise ValueError(f"DreamO Local: Specified local FLUX model directory not found: {flux_model_full_path}. Please ensure it exists under ComfyUI/models/checkpoints/.")
+        if os.path.isdir(path_dev):
+            flux_model_full_path = path_dev
+            print(f"DreamO Local: Found and using FLUX pipeline at: {flux_model_full_path}")
+        elif os.path.isdir(path_dev_fp8):
+            flux_model_full_path = path_dev_fp8
+            print(f"DreamO Local: Found and using FLUX pipeline at: {flux_model_full_path}")
+        else:
+            error_message = (
+                f"DreamO Local: Neither of the expected local FLUX model directories were found.\n"
+                f"Checked for: \n1. {path_dev}\n2. {path_dev_fp8}\n"
+                f"Please ensure one of these directories exists within {os.path.join(checkpoints_base_dir, 'FLUX1')}."
+            )
+            raise ValueError(error_message)
 
-        # Load DreamO pipeline from the resolved local path
+        # Load DreamO pipeline from the auto-detected local path
         dreamo_pipeline = DreamOPipeline.from_pretrained(flux_model_full_path, torch_dtype=torch.bfloat16)
         
         dreamo_lora_path = folder_paths.get_full_path("loras", dreamo_lora)
