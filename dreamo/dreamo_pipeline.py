@@ -38,32 +38,69 @@ def get_task_embedding_idx(task):
 
 class DreamOPipeline(FluxPipeline):
 
-    def load_dreamo_model(self, device, dreamo_lora_path, dreamo_cfg_distill_path, turbo_lora_path):
+    def load_dreamo_model(self, device, dreamo_lora_path, dreamo_cfg_distill_path, turbo_lora_path, quality_lora_pos_path=None, quality_lora_neg_path=None):
         self.t5_embedding = nn.Embedding(10, 4096)
         self.task_embedding = nn.Embedding(2, 3072)
         self.idx_embedding = nn.Embedding(10, 3072)
-        dreamo_lora = load_file(dreamo_lora_path)
-        cfg_distill_lora = load_file(dreamo_cfg_distill_path)
-        self.t5_embedding.weight.data = dreamo_lora.pop('dreamo_t5_embedding.weight')[-10:]
-        self.task_embedding.weight.data = dreamo_lora.pop('dreamo_task_embedding.weight')
-        self.idx_embedding.weight.data = dreamo_lora.pop('dreamo_idx_embedding.weight')
+        
+        dreamo_lora_state_dict = load_file(dreamo_lora_path)
+        cfg_distill_lora_state_dict = load_file(dreamo_cfg_distill_path)
+        
+        self.t5_embedding.weight.data = dreamo_lora_state_dict.pop('dreamo_t5_embedding.weight')[-10:]
+        self.task_embedding.weight.data = dreamo_lora_state_dict.pop('dreamo_task_embedding.weight')
+        self.idx_embedding.weight.data = dreamo_lora_state_dict.pop('dreamo_idx_embedding.weight')
         self._prepare_t5()
 
-        dreamo_diffuser_lora = convert_flux_lora_to_diffusers(dreamo_lora)
-        cfg_diffuser_lora = convert_flux_lora_to_diffusers(cfg_distill_lora)
-        adapter_names = ['dreamo']
-        adapter_weights = [1]
+        dreamo_diffuser_lora = convert_flux_lora_to_diffusers(dreamo_lora_state_dict)
+        cfg_diffuser_lora = convert_flux_lora_to_diffusers(cfg_distill_lora_state_dict)
+        
+        adapter_names = []
+        adapter_weights = []
+
+        # Main DreamO LoRA
         self.load_lora_weights(dreamo_diffuser_lora, adapter_name='dreamo')
-        if cfg_diffuser_lora is not None:
-            self.load_lora_weights(cfg_diffuser_lora, adapter_name='cfg')
-            adapter_names.append('cfg')
-            adapter_weights.append(1)
+        adapter_names.append('dreamo')
+        adapter_weights.append(1.0)
+
+        # CFG Distill LoRA
+        self.load_lora_weights(cfg_diffuser_lora, adapter_name='cfg')
+        adapter_names.append('cfg')
+        adapter_weights.append(1.0)
+        
+        # Turbo LoRA (Optional)
         if turbo_lora_path is not None:
+            # Assuming turbo_lora_path points to a diffusers-compatible LoRA file
             self.load_lora_weights(turbo_lora_path, adapter_name='turbo')
             adapter_names.append('turbo')
-            adapter_weights.append(1)
+            adapter_weights.append(1.0)
 
-        self.fuse_lora(adapter_names=adapter_names, adapter_weights=adapter_weights, lora_scale=1)
+        # Quality LoRA Positive (Optional)
+        if quality_lora_pos_path is not None:
+            quality_pos_state_dict = load_file(quality_lora_pos_path)
+            quality_pos_diffuser_lora = convert_flux_lora_to_diffusers(quality_pos_state_dict)
+            self.load_lora_weights(quality_pos_diffuser_lora, adapter_name='quality_pos')
+            adapter_names.append('quality_pos')
+            adapter_weights.append(0.15) # Official weight from bytedance-dreamo
+
+        # Quality LoRA Negative (Optional)
+        if quality_lora_neg_path is not None:
+            quality_neg_state_dict = load_file(quality_lora_neg_path)
+            quality_neg_diffuser_lora = convert_flux_lora_to_diffusers(quality_neg_state_dict)
+            self.load_lora_weights(quality_neg_diffuser_lora, adapter_name='quality_neg')
+            adapter_names.append('quality_neg')
+            adapter_weights.append(-0.8) # Official weight from bytedance-dreamo
+
+        # Fuse all loaded LoRAs
+        # The `fuse_lora` method can take `adapter_weights`.
+        # If `adapter_weights` is provided, it sets the scale for each adapter before fusing.
+        # `lora_scale` acts as a global multiplier if adapter_weights are not specified per adapter.
+        # Since we have specific weights, we use `adapter_weights`.
+        # The official bytedance repo uses `set_adapters` then `fuse_lora`.
+        # `fuse_lora` with `adapter_weights` should achieve a similar effect for scaling before merging.
+        if adapter_names: # Only fuse if there are adapters to fuse
+             self.fuse_lora(adapter_names=adapter_names, adapter_weights=adapter_weights, lora_scale=1.0)
+             # Optionally, unload after fusing to save memory, similar to official repo
+             # self.unload_lora_weights() # This would remove them from being individually addressable.
 
         self.t5_embedding = self.t5_embedding.to(device)
         self.task_embedding = self.task_embedding.to(device)
