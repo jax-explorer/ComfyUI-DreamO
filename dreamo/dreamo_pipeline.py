@@ -37,11 +37,36 @@ def get_task_embedding_idx(task):
 
 
 class DreamOPipeline(FluxPipeline):
-
-    def load_dreamo_model(self, device, dreamo_lora_path, dreamo_cfg_distill_path, dreamo_pos_path, dreamo_neg_path, turbo_lora_path):
+    
+    
+    def __init__(
+    self,
+    scheduler,
+    vae,
+    text_encoder,
+    tokenizer,
+    text_encoder_2,
+    tokenizer_2,
+    transformer,
+    image_encoder=None,
+    feature_extractor=None,
+):
+        super().__init__(
+            scheduler,
+            vae,
+            text_encoder,
+            tokenizer,
+            text_encoder_2,
+            tokenizer_2,
+            transformer,
+            image_encoder=image_encoder,
+            feature_extractor=feature_extractor,
+        )
         self.t5_embedding = nn.Embedding(10, 4096)
         self.task_embedding = nn.Embedding(2, 3072)
         self.idx_embedding = nn.Embedding(10, 3072)
+
+    def load_dreamo_model(self, device, dreamo_lora_path, dreamo_cfg_distill_path, dreamo_pos_path, dreamo_neg_path, turbo_lora_path):
         dreamo_lora = load_file(dreamo_lora_path)
         cfg_distill_lora = load_file(dreamo_cfg_distill_path)
         
