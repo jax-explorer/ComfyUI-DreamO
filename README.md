@@ -7,6 +7,16 @@ Note:
 This only a warpper. if you need full native comfyui impl. you can find other.
 
 
+### Update:
+many user need diffusers>=0.33.0
+create support_0.33.0 branch, change code by [https://github.com/bytedance/DreamO/issues/20](https://github.com/bytedance/DreamO/issues/20)
+and now this branch support diffusers>=0.33.0
+
+main branch need diffusers==0.31.0
+
+support_0.33.0 branch diffusers>=0.33.0
+
+
 open offload && 8bit can run on low vram, no open offload need 40GB.
 
 Flux model auto download to models/diffusers
