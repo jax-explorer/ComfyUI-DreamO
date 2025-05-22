@@ -94,9 +94,9 @@ class DreamOPipeline(FluxPipeline):
 
     @staticmethod
     def _prepare_latent_image_ids(batch_size, height, width, device, dtype, start_height=0, start_width=0):
-        latent_image_ids = torch.zeros(height // 2, width // 2, 3)
-        latent_image_ids[..., 1] = latent_image_ids[..., 1] + torch.arange(height // 2)[:, None] + start_height
-        latent_image_ids[..., 2] = latent_image_ids[..., 2] + torch.arange(width // 2)[None, :] + start_width
+        latent_image_ids = torch.zeros(height, width, 3)
+        latent_image_ids[..., 1] = latent_image_ids[..., 1] + torch.arange(height)[:, None] + start_height
+        latent_image_ids[..., 2] = latent_image_ids[..., 2] + torch.arange(width)[None, :] + start_width
 
         latent_image_id_height, latent_image_id_width, latent_image_id_channels = latent_image_ids.shape
 
@@ -341,7 +341,7 @@ class DreamOPipeline(FluxPipeline):
             cur_width = ref_latent.shape[3]
             ref_latent = self._pack_latents(ref_latent, batch_size, num_channels_latents, cur_height, cur_width)
             ref_latent_image_ids = self._prepare_latent_image_ids(
-                batch_size, cur_height, cur_width, device, prompt_embeds.dtype, start_height, start_width
+                batch_size, cur_height // 2, cur_width // 2, device, prompt_embeds.dtype, start_height, start_width
             )
             start_height += cur_height // 2
             start_width += cur_width // 2
