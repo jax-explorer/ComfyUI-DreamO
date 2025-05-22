@@ -16,7 +16,7 @@ main branch need diffusers==0.31.0
 
 support_0.33.0 branch diffusers>=0.33.0
 
-
+### Config
 open offload && 8bit can run on low vram, no open offload need 40GB.
 
 Flux model auto download to models/diffusers
