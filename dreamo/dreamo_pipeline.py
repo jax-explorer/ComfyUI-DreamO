@@ -44,8 +44,7 @@ class DreamOPipeline(FluxPipeline):
         self.idx_embedding = nn.Embedding(10, 3072)
         dreamo_lora = load_file(dreamo_lora_path)
         cfg_distill_lora = load_file(dreamo_cfg_distill_path)
-        dreamo_pos_lora = load_file(dreamo_pos_path)
-        dreamo_neg_lora = load_file(dreamo_neg_path)
+        
         self.t5_embedding.weight.data = dreamo_lora.pop('dreamo_t5_embedding.weight')[-10:]
         self.task_embedding.weight.data = dreamo_lora.pop('dreamo_task_embedding.weight')
         self.idx_embedding.weight.data = dreamo_lora.pop('dreamo_idx_embedding.weight')
@@ -53,8 +52,6 @@ class DreamOPipeline(FluxPipeline):
 
         dreamo_diffuser_lora = convert_flux_lora_to_diffusers(dreamo_lora)
         cfg_diffuser_lora = convert_flux_lora_to_diffusers(cfg_distill_lora)
-        dreamo_pos_diffusers_lora = convert_flux_lora_to_diffusers(dreamo_pos_lora)
-        dreamo_neg_diffusers_lora = convert_flux_lora_to_diffusers(dreamo_neg_lora)
         adapter_names = ['dreamo']
         adapter_weights = [1]
         self.load_lora_weights(dreamo_diffuser_lora, adapter_name='dreamo')
@@ -68,10 +65,14 @@ class DreamOPipeline(FluxPipeline):
             adapter_weights.append(1)
 
         if dreamo_pos_path is not None:
-            self.load_lora_weights(dreamo_pos_lora, adapter_name='quality_pos')
+            dreamo_pos_lora = load_file(dreamo_pos_path)
+            dreamo_pos_diffusers_lora = convert_flux_lora_to_diffusers(dreamo_pos_lora)
+            self.load_lora_weights(dreamo_pos_diffusers_lora, adapter_name='quality_pos')
             adapter_names.append('quality_pos')
             adapter_weights.append(0.15)
         if dreamo_neg_path is not None:
+            dreamo_neg_lora = load_file(dreamo_neg_path)
+            dreamo_neg_diffusers_lora = convert_flux_lora_to_diffusers(dreamo_neg_lora)
             self.load_lora_weights(dreamo_neg_lora, adapter_name='quality_neg')
             adapter_names.append('quality_neg')
             adapter_weights.append(-0.8)
