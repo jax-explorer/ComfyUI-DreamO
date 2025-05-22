@@ -7,7 +7,7 @@ Note:
 This only a warpper. if you need full native comfyui impl. you can find other.
 
 
-open offload can run on low vram, no open offload need 40GB.
+open offload && 8bit can run on low vram, no open offload need 40GB.
 
 Flux model auto download to models/diffusers
 
