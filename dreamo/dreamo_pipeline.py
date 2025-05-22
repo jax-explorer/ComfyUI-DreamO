@@ -73,7 +73,7 @@ class DreamOPipeline(FluxPipeline):
         if dreamo_neg_path is not None:
             dreamo_neg_lora = load_file(dreamo_neg_path)
             dreamo_neg_diffusers_lora = convert_flux_lora_to_diffusers(dreamo_neg_lora)
-            self.load_lora_weights(dreamo_neg_lora, adapter_name='quality_neg')
+            self.load_lora_weights(dreamo_neg_diffusers_lora, adapter_name='quality_neg')
             adapter_names.append('quality_neg')
             adapter_weights.append(-0.8)
 
